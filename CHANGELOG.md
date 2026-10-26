@@ -75,6 +75,7 @@ to docs, or any other relevant information.
   specific to the Temporal CLI dev server implementation and may no longer be valid if that implementation changes.
 
 ### Fixed
+- Fixed `WorkerFactory.awaitTermination` occasionally returning before activity worker shutdown completed, including workers with no registered activities.
 - Schedule action headers are now preserved when describing and updating a schedule.
 - `ActivityClient` now sends the `temporal-namespace` gRPC header like `WorkflowClient` and `ScheduleClient` do,
   so standalone activity calls are no longer rejected with `PERMISSION_DENIED` by namespace-scoped auth (e.g.

@@ -8,9 +8,11 @@ import io.temporal.worker.tuning.ActivitySlotInfo;
 import io.temporal.worker.tuning.SlotSupplier;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import javax.annotation.Nonnull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +29,7 @@ public class SyncActivityWorker implements SuspendableWorker {
   private final ActivityTaskHandlerImpl taskHandler;
   private final ActivityWorker worker;
   private final boolean allowActivityHeartbeatDuringShutdown;
+  private volatile CompletableFuture<Void> shutdownFuture;
 
   public SyncActivityWorker(
       WorkflowClient client,
@@ -93,26 +96,29 @@ public class SyncActivityWorker implements SuspendableWorker {
 
   @Override
   public CompletableFuture<Void> shutdown(ShutdownManager shutdownManager, boolean interruptTasks) {
-    CompletableFuture<Void> shutdownFuture;
+    CompletableFuture<Void> shutdownChain;
     if (allowActivityHeartbeatDuringShutdown && !interruptTasks) {
       // we want to shut down heartbeatExecutor only after all outstanding activity tasks have
       // finished executing, so in-flight activities can keep heartbeating during the shutdown
-      shutdownFuture =
+      shutdownChain =
           worker
               .shutdown(shutdownManager, interruptTasks)
               .thenCompose(r -> shutdownHeartbeatExecutor(shutdownManager));
     } else {
       // we want to shut down heartbeatExecutor before activity worker, so in-flight activities
       // could get an ActivityWorkerShutdownException from their heartbeat
-      shutdownFuture =
+      shutdownChain =
           shutdownHeartbeatExecutor(shutdownManager)
               .thenCompose(r -> worker.shutdown(shutdownManager, interruptTasks));
     }
-    return shutdownFuture.exceptionally(
-        e -> {
-          log.error("[BUG] Unexpected exception during shutdown", e);
-          return null;
-        });
+    CompletableFuture<Void> result =
+        shutdownChain.exceptionally(
+            e -> {
+              log.error("[BUG] Unexpected exception during shutdown", e);
+              return null;
+            });
+    shutdownFuture = result;
+    return result;
   }
 
   private CompletableFuture<Void> shutdownHeartbeatExecutor(ShutdownManager shutdownManager) {
@@ -123,6 +129,25 @@ public class SyncActivityWorker implements SuspendableWorker {
   @Override
   public void awaitTermination(long timeout, TimeUnit unit) {
     long timeoutMillis = unit.toMillis(timeout);
+    CompletableFuture<Void> shutdown = shutdownFuture;
+    if (shutdown != null) {
+      // Executor termination can precede the continuation that shuts down the other worker.
+      long remainingMillis = timeoutMillis;
+      timeoutMillis =
+          ShutdownManager.runAndGetRemainingTimeoutMs(
+              remainingMillis,
+              () -> {
+                try {
+                  shutdown.get(remainingMillis, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                  log.warn("Exception during waiting for termination", e);
+                } catch (TimeoutException e) {
+                  // The resource waits below must still run with the remaining budget.
+                }
+              });
+    }
     timeoutMillis = ShutdownManager.awaitTermination(worker, timeoutMillis);
     ShutdownManager.awaitTermination(heartbeatExecutor, timeoutMillis);
   }
