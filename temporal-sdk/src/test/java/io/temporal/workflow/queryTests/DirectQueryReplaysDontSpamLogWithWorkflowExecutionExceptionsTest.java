@@ -1,5 +1,6 @@
 package io.temporal.workflow.queryTests;
 
+import static io.temporal.testUtils.Eventually.assertEventually;
 import static org.junit.Assert.*;
 import static org.junit.Assume.assumeTrue;
 
@@ -86,7 +87,8 @@ public class DirectQueryReplaysDontSpamLogWithWorkflowExecutionExceptionsTest {
 
     WorkflowExecution execution = WorkflowClient.start(workflow::execute);
 
-    assertEquals("my-state", workflow.getState());
+    // Evict only after the activity failure is handled, so query replay cannot overtake its WFT.
+    assertEventually(Duration.ofSeconds(10), () -> assertEquals("my-state", workflow.getState()));
     assertEquals("There was only one execution.", 1, workflowCodeExecutionCount.get());
 
     testWorkflowRule.invalidateWorkflowCache();
@@ -120,6 +122,7 @@ public class DirectQueryReplaysDontSpamLogWithWorkflowExecutionExceptionsTest {
                 .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
                 .build());
     private boolean exit;
+    private String state;
 
     @Override
     public String execute() {
@@ -129,6 +132,7 @@ public class DirectQueryReplaysDontSpamLogWithWorkflowExecutionExceptionsTest {
           activities.throwIO();
         } catch (ActivityFailure e) {
           logger.error("Unexpected error on activity", e);
+          state = "my-state";
           Workflow.await(() -> exit);
           return "exit";
         }
@@ -137,7 +141,7 @@ public class DirectQueryReplaysDontSpamLogWithWorkflowExecutionExceptionsTest {
 
     @Override
     public String getState() {
-      return "my-state";
+      return state;
     }
 
     @Override
