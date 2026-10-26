@@ -385,6 +385,8 @@ public class AsyncPollerTest {
           assertEquals(0, executor.processed.get());
           assertEquals(1, slotSupplierInner.reservedCount.get());
           assertEquals(0, slotSupplier.getUsedSlots().size());
+          // Ensure the next reservation has passed the suspension check before suspending.
+          assertEquals(2, reserveCalls.get());
         });
     // Suspend polling again, this will not affect the already issued poll request
     poller.suspendPolling();
