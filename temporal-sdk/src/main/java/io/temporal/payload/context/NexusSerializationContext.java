@@ -13,11 +13,12 @@ import javax.annotation.Nonnull;
  * results and failures. Handlers receive it when decoding operation inputs, encoding synchronous
  * operation results, and encoding failures produced while handling a Nexus task.
  *
- * <p>When a handler starts a workflow or a standalone activity, this context is propagated to it
- * through the server. Both use it only for their result and failures, which are returned to the
- * caller, and a standalone activity also uses it for its heartbeat details, which the server puts
- * into its timeout failure. A workflow's input, memo, static summary and details, signals, queries
- * and updates keep the {@link WorkflowSerializationContext}; a standalone activity's input and
+ * <p>When a handler starts a workflow, sends a workflow update or starts a standalone activity,
+ * this context is propagated to it through the server. They use it only for their result and
+ * failures, which are returned to the caller, and a standalone activity also uses it for its
+ * heartbeat details, which the server puts into its timeout failure. A workflow's input, memo,
+ * static summary and details, signals, queries and updates not sent by a handler keep the {@link
+ * WorkflowSerializationContext}, as do an update's arguments; a standalone activity's input and
  * static summary and details keep the {@link ActivitySerializationContext}. Clients reading their
  * results, including handles obtained by ID, use the context the server returns. This requires a
  * server that propagates the context; older servers ignore it.
